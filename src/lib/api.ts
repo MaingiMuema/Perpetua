@@ -1,15 +1,19 @@
-import axios, { AxiosError } from 'axios';
+/* eslint-disable @typescript-eslint/no-unused-vars */
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, GenerateContentResponse } from '@google/generative-ai';
 
 interface DialogueResponse {
   text: string;
   error?: string;
 }
 
+// Initialize Gemini
+const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_KEY!);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
 // Keep track of requests in a rolling window
 const requestTimes: number[] = [];
 const RATE_LIMIT = 60; // requests per minute
 const WINDOW_MS = 60 * 1000; // 1 minute in milliseconds
-// Be more conservative with request timing to prevent rate limit issues
 const BUFFER_FACTOR = 0.8; // Only use 80% of our rate limit
 const EFFECTIVE_RATE_LIMIT = Math.floor(RATE_LIMIT * BUFFER_FACTOR);
 const MIN_REQUEST_INTERVAL = Math.ceil(WINDOW_MS / EFFECTIVE_RATE_LIMIT);
@@ -73,7 +77,6 @@ export const generateResponse = async (
     // Check rate limit
     if (!canMakeRequest()) {
       const waitTime = getWaitTime();
-      console.log(`Rate limit reached. Waiting ${Math.ceil(waitTime / 1000)} seconds...`);
       await delay(waitTime);
     }
 
@@ -90,33 +93,16 @@ export const generateResponse = async (
     requestTimes.push(now);
 
     try {
-      const response = await axios.post(
-        'https://api.hyperbolic.xyz/v1/chat/completions',
-        {
-          model: 'deepseek-ai/DeepSeek-V3',
-          messages: [
-            {
-              role: 'system',
-              content: `You are an AI with a ${persona} personality engaging in a philosophical dialogue. Keep responses concise and thought-provoking.`
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          max_tokens: 512,
-          temperature: 0.1,
-          top_p: 0.9
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${process.env.NEXT_PUBLIC_HYPERBOLIC_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          signal,
-          timeout: 30000 // 30 second timeout
-        }
-      );
+      // Create chat history with persona and prompt
+      const systemPrompt = `You are an AI with a ${persona} personality engaging in a philosophical dialogue. Keep responses concise (maximum 3-4 sentences) and thought-provoking. Your response should naturally flow from the previous message or prompt while maintaining your ${persona} perspective.`;
+      
+      const result = await model.generateContent([
+        { text: systemPrompt },
+        { text: prompt }
+      ]);
+
+      const response = await result.response;
+      const text = response.text();
 
       // Check if aborted after response
       if (signal?.aborted) {
@@ -126,9 +112,11 @@ export const generateResponse = async (
         };
       }
 
-      return {
-        text: response.data.choices[0].message.content
-      };
+      if (!text) {
+        throw new Error('Empty response from Gemini');
+      }
+
+      return { text };
     } catch (error) {
       // Remove the failed request from our window
       const index = requestTimes.indexOf(now);
@@ -138,37 +126,47 @@ export const generateResponse = async (
       throw error;
     }
   } catch (error) {
-    // Handle abort error
-    if (axios.isCancel(error)) {
+    // Handle abort error first
+    if (signal?.aborted) {
       return {
         text: '',
         error: 'Generation cancelled'
       };
     }
 
-    // Handle rate limiting with silent retry
-    if (error instanceof AxiosError && error.response?.status === 429) {
-      // Get retry delay from headers or use exponential backoff
-      const retryAfter = parseInt(error.response.headers['retry-after'] || '0') * 1000;
-      const backoffDelay = getRetryDelay(retryCount);
-      const waitTime = Math.max(retryAfter, backoffDelay);
+    // Handle retryable errors
+    const isRetryableError = 
+      error instanceof Error && (
+        error.message.includes('rate') || // Rate limit errors
+        error.message.includes('timeout') || // Timeouts
+        error.message.includes('network') || // Network errors
+        error.message.includes('internal') // Internal server errors
+      );
 
-      if (retryCount < 5) { // Increased max retries since we're handling silently
-        await delay(waitTime);
-        return generateResponse(prompt, persona, signal, retryCount + 1);
-      }
+    if (isRetryableError && retryCount < 5) {
+      const backoffDelay = getRetryDelay(retryCount);
+      await delay(backoffDelay);
+      return generateResponse(prompt, persona, signal, retryCount + 1);
     }
 
-    // Only log non-rate-limit errors
-    if (!(error instanceof AxiosError) || error.response?.status !== 429) {
+    // Only log non-retryable errors
+    if (!isRetryableError) {
       console.error('Error generating response:', error);
+    }
+
+    // Return appropriate error message
+    let errorMessage = 'Failed to generate response. Please try again.';
+    if (error instanceof Error) {
+      if (error.message.includes('rate')) {
+        errorMessage = 'Too many requests. Please wait a moment before trying again.';
+      } else if (error.message.includes('timeout')) {
+        errorMessage = 'Request timed out. Retrying...';
+      }
     }
 
     return {
       text: '',
-      error: error instanceof AxiosError && error.response?.status === 429
-        ? 'Too many requests. Please wait a moment before trying again.'
-        : 'Failed to generate response. Please try again.'
+      error: errorMessage
     };
   }
 };
