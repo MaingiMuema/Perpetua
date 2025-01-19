@@ -5,12 +5,41 @@ interface DialogueResponse {
   error?: string;
 }
 
+// Keep track of requests in a rolling window
+const requestTimes: number[] = [];
+const RATE_LIMIT = 60; // requests per minute
+const WINDOW_MS = 60 * 1000; // 1 minute in milliseconds
+const MIN_REQUEST_INTERVAL = Math.ceil(WINDOW_MS / RATE_LIMIT); // Minimum time between requests
+
 // Simple delay function
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Keep track of last request time
-let lastRequestTime = 0;
-const MIN_REQUEST_INTERVAL = 2000; // Minimum 2 seconds between requests
+// Check if we can make a request
+const canMakeRequest = () => {
+  const now = Date.now();
+  // Remove requests older than our window
+  while (requestTimes.length > 0 && requestTimes[0] < now - WINDOW_MS) {
+    requestTimes.shift();
+  }
+  return requestTimes.length < RATE_LIMIT;
+};
+
+// Calculate wait time if we're rate limited
+const getWaitTime = () => {
+  const now = Date.now();
+  if (requestTimes.length === 0) return 0;
+  
+  // If we've hit the rate limit, calculate when we can make the next request
+  if (requestTimes.length >= RATE_LIMIT) {
+    const oldestRequest = requestTimes[0];
+    return oldestRequest + WINDOW_MS - now;
+  }
+  
+  // Otherwise, ensure minimum interval between requests
+  const lastRequest = requestTimes[requestTimes.length - 1];
+  const timeSinceLastRequest = now - lastRequest;
+  return Math.max(0, MIN_REQUEST_INTERVAL - timeSinceLastRequest);
+};
 
 export const generateResponse = async (
   prompt: string,
@@ -18,12 +47,15 @@ export const generateResponse = async (
   retryCount = 0
 ): Promise<DialogueResponse> => {
   try {
-    // Ensure minimum time between requests
-    const now = Date.now();
-    const timeSinceLastRequest = now - lastRequestTime;
-    if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
-      await delay(MIN_REQUEST_INTERVAL - timeSinceLastRequest);
+    // Check rate limit
+    if (!canMakeRequest()) {
+      const waitTime = getWaitTime();
+      console.log(`Rate limit reached. Waiting ${Math.ceil(waitTime / 1000)} seconds...`);
+      await delay(waitTime);
     }
+
+    // Record this request
+    requestTimes.push(Date.now());
 
     const response = await axios.post(
       'https://api.hyperbolic.xyz/v1/chat/completions',
@@ -51,7 +83,6 @@ export const generateResponse = async (
       }
     );
 
-    lastRequestTime = Date.now();
     return {
       text: response.data.choices[0].message.content
     };
@@ -62,7 +93,7 @@ export const generateResponse = async (
     if (error instanceof AxiosError && error.response?.status === 429) {
       if (retryCount < 3) {
         const retryAfter = parseInt(error.response.headers['retry-after'] || '5');
-        console.log(`Rate limited. Retrying after ${retryAfter} seconds...`);
+        console.log(`Rate limited by server. Retrying after ${retryAfter} seconds...`);
         await delay(retryAfter * 1000);
         return generateResponse(prompt, persona, retryCount + 1);
       }

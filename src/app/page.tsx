@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { DialogueBox } from '@/components/DialogueBox';
 import { Controls } from '@/components/Controls';
 import { PersonaSelector, personas } from '@/components/PersonaSelector';
@@ -20,7 +20,7 @@ const philosophicalPrompts = [
   'What is the relationship between mind and matter?',
 ];
 
-const RESPONSE_DELAY = 5000; // 5 seconds between responses
+const RESPONSE_DELAY = 2000; // 2 seconds between responses
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -32,8 +32,23 @@ export default function Home() {
     agent2: 'analytical',
   });
 
+  // Use refs to track timeouts and mounted state
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef(true);
+
+  // Cleanup function to clear timeout
+  const clearMessageTimeout = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
+
   const generateNextMessage = useCallback(async (previousMessage?: Message) => {
-    if (isPaused || isLoading) return;
+    if (isPaused || isLoading || !isMountedRef.current) return;
+
+    // Clear any existing timeout
+    clearMessageTimeout();
 
     setIsLoading(true);
     setError(null);
@@ -48,6 +63,8 @@ export default function Home() {
         : philosophicalPrompts[Math.floor(Math.random() * philosophicalPrompts.length)];
 
       const response = await generateResponse(prompt, personas[currentPersona as keyof typeof personas].name);
+
+      if (!isMountedRef.current) return; // Check if component is still mounted
 
       if (response.error) {
         setError(response.error);
@@ -64,39 +81,71 @@ export default function Home() {
 
         setMessages((prev) => [...prev, newMessage]);
         
-        // Continue the conversation after a longer delay
-        setTimeout(() => {
-          generateNextMessage(newMessage);
-        }, RESPONSE_DELAY);
+        // Only schedule next message if not paused
+        if (!isPaused && isMountedRef.current) {
+          timeoutRef.current = setTimeout(() => {
+            if (isMountedRef.current && !isPaused) {
+              generateNextMessage(newMessage);
+            }
+          }, RESPONSE_DELAY);
+        }
       }
     } catch (error) {
-      console.error('Error generating message:', error);
-      setError('Failed to generate response. Please try again later.');
+      if (isMountedRef.current) {
+        console.error('Error generating message:', error);
+        setError('Failed to generate response. Please try again later.');
+      }
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [isPaused, isLoading, selectedPersonas]);
+  }, [isPaused, isLoading, selectedPersonas, clearMessageTimeout]);
 
+  // Cleanup on unmount
   useEffect(() => {
-    if (messages.length === 0 && !isPaused) {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      clearMessageTimeout();
+    };
+  }, [clearMessageTimeout]);
+
+  // Start conversation when mounted
+  useEffect(() => {
+    if (messages.length === 0 && !isPaused && isMountedRef.current) {
       generateNextMessage();
     }
   }, [messages.length, isPaused, generateNextMessage]);
 
-  const handlePauseToggle = () => {
-    setIsPaused((prev) => !prev);
-    if (isPaused && messages.length > 0) {
-      generateNextMessage(messages[messages.length - 1]);
-    }
-  };
+  const handlePauseToggle = useCallback(() => {
+    setIsPaused((prev) => {
+      const newPausedState = !prev;
+      if (!newPausedState && messages.length > 0) {
+        // If unpausing, start new message after delay
+        timeoutRef.current = setTimeout(() => {
+          if (isMountedRef.current) {
+            generateNextMessage(messages[messages.length - 1]);
+          }
+        }, RESPONSE_DELAY);
+      } else if (newPausedState) {
+        // If pausing, clear scheduled messages
+        clearMessageTimeout();
+      }
+      return newPausedState;
+    });
+  }, [messages, generateNextMessage, clearMessageTimeout]);
 
-  const handleReset = () => {
+  const handleReset = useCallback(() => {
+    clearMessageTimeout();
     setMessages([]);
     setIsPaused(false);
     setError(null);
-  };
+    setIsLoading(false);
+  }, [clearMessageTimeout]);
 
-  const handlePromptSubmit = (prompt: string) => {
+  const handlePromptSubmit = useCallback((prompt: string) => {
+    clearMessageTimeout();
     const newMessage: Message = {
       text: prompt,
       agent: 'agent1',
@@ -104,14 +153,14 @@ export default function Home() {
     };
     setMessages((prev) => [...prev, newMessage]);
     generateNextMessage(newMessage);
-  };
+  }, [clearMessageTimeout, generateNextMessage]);
 
-  const handlePersonaSelect = (agent: 'agent1' | 'agent2', persona: string) => {
+  const handlePersonaSelect = useCallback((agent: 'agent1' | 'agent2', persona: string) => {
     setSelectedPersonas((prev) => ({
       ...prev,
       [agent]: persona,
     }));
-  };
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-950 text-white p-8">
