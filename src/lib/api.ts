@@ -17,7 +17,7 @@ export const generateResponse = async (
         messages: [
           {
             role: 'system',
-            content: `You are an AI with a ${persona} personality engaging in a philosophical dialogue.`
+            content: `You are an AI with a ${persona} personality engaging in a philosophical dialogue. Keep responses concise and thought-provoking.`
           },
           {
             role: 'user',
@@ -30,7 +30,7 @@ export const generateResponse = async (
       },
       {
         headers: {
-          'Authorization': `Bearer ${process.env.HYPERBOLIC_API_KEY}`,
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_HYPERBOLIC_API_KEY}`,
           'Content-Type': 'application/json'
         }
       }

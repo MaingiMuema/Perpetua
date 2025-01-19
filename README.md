@@ -18,7 +18,6 @@
 ### **Prerequisites**
 - Node.js (v16 or higher)
 - npm (Node Package Manager)
-- API key from [Hyperbolic.xyz](https://api.hyperbolic.xyz)
 
 ### **Installation**
 1. Clone the repository:
@@ -29,10 +28,6 @@
 2. Install dependencies:
    ```bash
    npm install
-   ```
-3. Create a `.env.local` file in the root directory and add your API key:
-   ```env
-   HYPERBOLIC_API_KEY=your_api_key_here
    ```
 
 ### **Running the Project**
@@ -45,37 +40,40 @@
 ---
 
 ## **API Integration**
-Perpetua uses the Hyperbolic.xyz API to power the AI dialogue. Below is an example of how the API is integrated:
+Perpetua uses the Hyperbolic API with DeepSeek-V3 model to power the AI dialogue. Below is an example of how the API is integrated:
 
-```python
-import requests
-
-url = "https://api.hyperbolic.xyz/v1/chat/completions"
-headers = {
-    "Content-Type": "application/json",
-    "Authorization": f"Bearer {process.env.HYPERBOLIC_API_KEY}"
-}
-data = {
-    "messages": [
-        {
-            "role": "user",
-            "content": "What is the meaning of life?"
-        }
+```typescript
+const response = await axios.post(
+  'https://api.hyperbolic.xyz/v1/chat/completions',
+  {
+    model: 'deepseek-ai/DeepSeek-V3',
+    messages: [
+      {
+        role: 'system',
+        content: 'You are an AI engaging in a philosophical dialogue.'
+      },
+      {
+        role: 'user',
+        content: 'What is the meaning of life?'
+      }
     ],
-    "model": "deepseek-ai/DeepSeek-V3",
-    "max_tokens": 512,
-    "temperature": 0.1,
-    "top_p": 0.9
-}
-
-response = requests.post(url, headers=headers, json=data)
-print(response.json())
+    max_tokens: 512,
+    temperature: 0.1,
+    top_p: 0.9
+  },
+  {
+    headers: {
+      'Authorization': 'Bearer [API_KEY]',
+      'Content-Type': 'application/json'
+    }
+  }
+);
 ```
 
 ### **API Configuration**
 - **Model:** `deepseek-ai/DeepSeek-V3`
-- **Max Tokens:** 512
-- **Temperature:** 0.1 (controls creativity; lower values make responses more deterministic)
+- **Max Tokens:** 512 (controls response length)
+- **Temperature:** 0.1 (controls creativity; lower values make responses more focused)
 - **Top_p:** 0.9 (controls diversity; higher values allow for more varied responses)
 
 ---
@@ -89,9 +87,8 @@ Perpetua/
 │   ├── lib/             # Utility functions (e.g., API calls)
 │   ├── pages/           # Next.js pages
 │   └── styles/          # CSS or Tailwind styles
-├── .env.local           # Environment variables
 ├── package.json         # Project dependencies
-└── README.md            # This file
+└── README.md           # This file
 ```
 
 ---
@@ -121,9 +118,9 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ---
 
 ## **Acknowledgments**
-- [Hyperbolic.xyz](https://api.hyperbolic.xyz) for providing the AI API.
-- [Next.js](https://nextjs.org/) for the framework.
-- The open-source community for inspiration and support.
+- [DeepSeek AI](https://deepseek.ai) for the powerful language model
+- [Next.js](https://nextjs.org/) for the framework
+- The open-source community for inspiration and support
 
 ---
 
