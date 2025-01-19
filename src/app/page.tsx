@@ -176,18 +176,81 @@ export default function Home() {
     setIsLoading(false);
   }, [cleanup]);
 
-  const handlePromptSubmit = useCallback((prompt: string) => {
+  const handlePromptSubmit = useCallback(async (prompt: string) => {
     if (isGeneratingRef.current || isLoading) return;
     
-    cleanup();
-    const newMessage: Message = {
-      text: prompt,
-      agent: 'agent1',
-      timestamp: Date.now(),
-    };
-    setMessages((prev) => [...prev, newMessage]);
-    generateNextMessage(newMessage);
-  }, [cleanup, generateNextMessage, isLoading]);
+    try {
+      // Clean up any existing operations
+      cleanup();
+      setIsLoading(true);
+      setError(null);
+
+      // Create the user's message
+      const userMessage: Message = {
+        text: prompt,
+        agent: 'agent1',
+        timestamp: Date.now(),
+      };
+      
+      // Add user message to chat
+      setMessages(prev => [...prev, userMessage]);
+
+      // Create new abort controller for AI response
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+
+      // Get AI response
+      const response = await generateResponse(
+        prompt,
+        personas[selectedPersonas.agent2 as keyof typeof personas].name,
+        abortControllerRef.current.signal
+      );
+
+      // Check if we should continue after the response
+      if (!isMountedRef.current || isPaused) {
+        return;
+      }
+
+      if (response.error) {
+        if (response.error === 'Generation cancelled') {
+          return;
+        }
+        setError(response.error);
+        return;
+      }
+
+      if (response.text) {
+        const aiMessage: Message = {
+          text: response.text,
+          agent: 'agent2',
+          timestamp: Date.now(),
+        };
+
+        setMessages(prev => [...prev, aiMessage]);
+        
+        // Schedule next message if not paused
+        if (!isPaused && isMountedRef.current) {
+          timeoutRef.current = setTimeout(() => {
+            if (!isPaused && isMountedRef.current) {
+              generateNextMessage(aiMessage);
+            }
+          }, RESPONSE_DELAY);
+        }
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        console.error('Error processing prompt:', error);
+        setError('Failed to process your prompt. Please try again.');
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
+      isGeneratingRef.current = false;
+    }
+  }, [cleanup, generateNextMessage, isPaused, selectedPersonas, isLoading]);
 
   const handlePersonaSelect = useCallback((agent: 'agent1' | 'agent2', persona: string) => {
     setSelectedPersonas((prev) => ({
@@ -219,6 +282,7 @@ export default function Home() {
 
         <Controls
           isPaused={isPaused}
+          isLoading={isLoading}
           onPauseToggle={handlePauseToggle}
           onReset={handleReset}
           onPromptSubmit={handlePromptSubmit}
