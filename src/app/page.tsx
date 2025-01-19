@@ -20,10 +20,13 @@ const philosophicalPrompts = [
   'What is the relationship between mind and matter?',
 ];
 
+const RESPONSE_DELAY = 5000; // 5 seconds between responses
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [selectedPersonas, setSelectedPersonas] = useState({
     agent1: 'optimistic',
     agent2: 'analytical',
@@ -33,6 +36,8 @@ export default function Home() {
     if (isPaused || isLoading) return;
 
     setIsLoading(true);
+    setError(null);
+    
     const isAgent1 = !previousMessage || previousMessage.agent === 'agent2';
     const currentAgent = isAgent1 ? 'agent1' : 'agent2';
     const currentPersona = selectedPersonas[currentAgent];
@@ -44,7 +49,13 @@ export default function Home() {
 
       const response = await generateResponse(prompt, personas[currentPersona as keyof typeof personas].name);
 
-      if (response.text && !response.error) {
+      if (response.error) {
+        setError(response.error);
+        setIsLoading(false);
+        return;
+      }
+
+      if (response.text) {
         const newMessage: Message = {
           text: response.text,
           agent: currentAgent,
@@ -53,13 +64,14 @@ export default function Home() {
 
         setMessages((prev) => [...prev, newMessage]);
         
-        // Continue the conversation after a short delay
+        // Continue the conversation after a longer delay
         setTimeout(() => {
           generateNextMessage(newMessage);
-        }, 2000);
+        }, RESPONSE_DELAY);
       }
     } catch (error) {
       console.error('Error generating message:', error);
+      setError('Failed to generate response. Please try again later.');
     } finally {
       setIsLoading(false);
     }
@@ -81,6 +93,7 @@ export default function Home() {
   const handleReset = () => {
     setMessages([]);
     setIsPaused(false);
+    setError(null);
   };
 
   const handlePromptSubmit = (prompt: string) => {
@@ -112,6 +125,12 @@ export default function Home() {
           selectedPersonas={selectedPersonas}
           onPersonaSelect={handlePersonaSelect}
         />
+
+        {error && (
+          <div className="bg-red-900/50 border border-red-500 text-red-200 px-4 py-2 rounded-lg">
+            {error}
+          </div>
+        )}
 
         <DialogueBox messages={messages} isLoading={isLoading} />
 
