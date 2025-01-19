@@ -146,20 +146,22 @@ export const generateResponse = async (
       };
     }
 
-    console.error('Error generating response:', error);
-
-    // Handle rate limiting
+    // Handle rate limiting with silent retry
     if (error instanceof AxiosError && error.response?.status === 429) {
       // Get retry delay from headers or use exponential backoff
       const retryAfter = parseInt(error.response.headers['retry-after'] || '0') * 1000;
       const backoffDelay = getRetryDelay(retryCount);
       const waitTime = Math.max(retryAfter, backoffDelay);
 
-      if (retryCount < 3) {
-        console.log(`Rate limited by server. Retrying after ${Math.ceil(waitTime / 1000)} seconds...`);
+      if (retryCount < 5) { // Increased max retries since we're handling silently
         await delay(waitTime);
         return generateResponse(prompt, persona, signal, retryCount + 1);
       }
+    }
+
+    // Only log non-rate-limit errors
+    if (!(error instanceof AxiosError) || error.response?.status !== 429) {
+      console.error('Error generating response:', error);
     }
 
     return {
