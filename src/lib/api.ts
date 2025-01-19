@@ -44,14 +44,31 @@ const getWaitTime = () => {
 export const generateResponse = async (
   prompt: string,
   persona: string,
+  signal?: AbortSignal,
   retryCount = 0
 ): Promise<DialogueResponse> => {
   try {
+    // Check if already aborted
+    if (signal?.aborted) {
+      return {
+        text: '',
+        error: 'Generation cancelled'
+      };
+    }
+
     // Check rate limit
     if (!canMakeRequest()) {
       const waitTime = getWaitTime();
       console.log(`Rate limit reached. Waiting ${Math.ceil(waitTime / 1000)} seconds...`);
       await delay(waitTime);
+    }
+
+    // Check if aborted during wait
+    if (signal?.aborted) {
+      return {
+        text: '',
+        error: 'Generation cancelled'
+      };
     }
 
     // Record this request
@@ -79,14 +96,31 @@ export const generateResponse = async (
         headers: {
           'Authorization': `Bearer ${process.env.NEXT_PUBLIC_HYPERBOLIC_API_KEY}`,
           'Content-Type': 'application/json'
-        }
+        },
+        signal // Pass the abort signal to axios
       }
     );
+
+    // Check if aborted after response
+    if (signal?.aborted) {
+      return {
+        text: '',
+        error: 'Generation cancelled'
+      };
+    }
 
     return {
       text: response.data.choices[0].message.content
     };
   } catch (error) {
+    // Handle abort error
+    if (axios.isCancel(error)) {
+      return {
+        text: '',
+        error: 'Generation cancelled'
+      };
+    }
+
     console.error('Error generating response:', error);
 
     // Handle rate limiting
@@ -95,7 +129,7 @@ export const generateResponse = async (
         const retryAfter = parseInt(error.response.headers['retry-after'] || '5');
         console.log(`Rate limited by server. Retrying after ${retryAfter} seconds...`);
         await delay(retryAfter * 1000);
-        return generateResponse(prompt, persona, retryCount + 1);
+        return generateResponse(prompt, persona, signal, retryCount + 1);
       }
     }
 

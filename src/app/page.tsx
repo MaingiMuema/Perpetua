@@ -32,43 +32,73 @@ export default function Home() {
     agent2: 'analytical',
   });
 
-  // Use refs to track timeouts and mounted state
+  // Use refs to track timeouts, mounted state, and active generation
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef(true);
+  const isGeneratingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Cleanup function to clear timeout
-  const clearMessageTimeout = useCallback(() => {
+  // Cleanup function to clear timeout and abort ongoing request
+  const cleanup = useCallback(() => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    isGeneratingRef.current = false;
   }, []);
 
   const generateNextMessage = useCallback(async (previousMessage?: Message) => {
-    if (isPaused || isLoading || !isMountedRef.current) return;
-
-    // Clear any existing timeout
-    clearMessageTimeout();
-
-    setIsLoading(true);
-    setError(null);
-    
-    const isAgent1 = !previousMessage || previousMessage.agent === 'agent2';
-    const currentAgent = isAgent1 ? 'agent1' : 'agent2';
-    const currentPersona = selectedPersonas[currentAgent];
+    // Check all conditions that should prevent generation
+    if (!isMountedRef.current || isPaused || isLoading || isGeneratingRef.current) {
+      return;
+    }
 
     try {
+      // Create new abort controller for this request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+
+      isGeneratingRef.current = true;
+      setIsLoading(true);
+      setError(null);
+      
+      const isAgent1 = !previousMessage || previousMessage.agent === 'agent2';
+      const currentAgent = isAgent1 ? 'agent1' : 'agent2';
+      const currentPersona = selectedPersonas[currentAgent];
+
       const prompt = previousMessage
         ? previousMessage.text
         : philosophicalPrompts[Math.floor(Math.random() * philosophicalPrompts.length)];
 
-      const response = await generateResponse(prompt, personas[currentPersona as keyof typeof personas].name);
+      // Clear any existing timeout before making the request
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
 
-      if (!isMountedRef.current) return; // Check if component is still mounted
+      const response = await generateResponse(
+        prompt, 
+        personas[currentPersona as keyof typeof personas].name,
+        abortControllerRef.current.signal
+      );
+
+      // Check if we should continue after the response
+      if (!isMountedRef.current || isPaused) {
+        return;
+      }
 
       if (response.error) {
+        if (response.error === 'Generation cancelled') {
+          // Don't show error for cancelled requests
+          return;
+        }
         setError(response.error);
-        setIsLoading(false);
         return;
       }
 
@@ -84,7 +114,8 @@ export default function Home() {
         // Only schedule next message if not paused
         if (!isPaused && isMountedRef.current) {
           timeoutRef.current = setTimeout(() => {
-            if (isMountedRef.current && !isPaused) {
+            // Check pause state again when timeout fires
+            if (!isPaused && isMountedRef.current) {
               generateNextMessage(newMessage);
             }
           }, RESPONSE_DELAY);
@@ -99,17 +130,18 @@ export default function Home() {
       if (isMountedRef.current) {
         setIsLoading(false);
       }
+      isGeneratingRef.current = false;
     }
-  }, [isPaused, isLoading, selectedPersonas, clearMessageTimeout]);
+  }, [isPaused, isLoading, selectedPersonas]);
 
   // Cleanup on unmount
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      clearMessageTimeout();
+      cleanup();
     };
-  }, [clearMessageTimeout]);
+  }, [cleanup]);
 
   // Start conversation when mounted
   useEffect(() => {
@@ -121,31 +153,33 @@ export default function Home() {
   const handlePauseToggle = useCallback(() => {
     setIsPaused((prev) => {
       const newPausedState = !prev;
-      if (!newPausedState && messages.length > 0) {
-        // If unpausing, start new message after delay
+      if (newPausedState) {
+        // If pausing, clear any pending operations and abort current request
+        cleanup();
+      } else if (messages.length > 0) {
+        // Only start new message after delay when unpausing
         timeoutRef.current = setTimeout(() => {
-          if (isMountedRef.current) {
+          if (isMountedRef.current && !isPaused) {
             generateNextMessage(messages[messages.length - 1]);
           }
         }, RESPONSE_DELAY);
-      } else if (newPausedState) {
-        // If pausing, clear scheduled messages
-        clearMessageTimeout();
       }
       return newPausedState;
     });
-  }, [messages, generateNextMessage, clearMessageTimeout]);
+  }, [messages, generateNextMessage, cleanup, isPaused]);
 
   const handleReset = useCallback(() => {
-    clearMessageTimeout();
+    cleanup();
     setMessages([]);
     setIsPaused(false);
     setError(null);
     setIsLoading(false);
-  }, [clearMessageTimeout]);
+  }, [cleanup]);
 
   const handlePromptSubmit = useCallback((prompt: string) => {
-    clearMessageTimeout();
+    if (isGeneratingRef.current || isLoading) return;
+    
+    cleanup();
     const newMessage: Message = {
       text: prompt,
       agent: 'agent1',
@@ -153,7 +187,7 @@ export default function Home() {
     };
     setMessages((prev) => [...prev, newMessage]);
     generateNextMessage(newMessage);
-  }, [clearMessageTimeout, generateNextMessage]);
+  }, [cleanup, generateNextMessage, isLoading]);
 
   const handlePersonaSelect = useCallback((agent: 'agent1' | 'agent2', persona: string) => {
     setSelectedPersonas((prev) => ({
