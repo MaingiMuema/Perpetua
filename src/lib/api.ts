@@ -1,5 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, GenerateContentResponse } from '@google/generative-ai';
+import {
+  GoogleGenerativeAI,
+  HarmCategory,
+  HarmBlockThreshold,
+  GenerateContentResponse,
+} from "@google/generative-ai";
 
 interface DialogueResponse {
   text: string;
@@ -19,7 +24,7 @@ const EFFECTIVE_RATE_LIMIT = Math.floor(RATE_LIMIT * BUFFER_FACTOR);
 const MIN_REQUEST_INTERVAL = Math.ceil(WINDOW_MS / EFFECTIVE_RATE_LIMIT);
 
 // Simple delay function
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Clean old requests from the window
 const cleanRequestWindow = () => {
@@ -39,15 +44,15 @@ const canMakeRequest = () => {
 const getWaitTime = () => {
   const now = Date.now();
   cleanRequestWindow();
-  
+
   if (requestTimes.length === 0) return 0;
-  
+
   // If we've hit the effective rate limit, calculate when we can make the next request
   if (requestTimes.length >= EFFECTIVE_RATE_LIMIT) {
     const oldestRequest = requestTimes[0];
     return oldestRequest + WINDOW_MS - now + 1000; // Add 1 second buffer
   }
-  
+
   // Ensure minimum interval between requests
   const lastRequest = requestTimes[requestTimes.length - 1];
   const timeSinceLastRequest = now - lastRequest;
@@ -69,8 +74,8 @@ export const generateResponse = async (
     // Check if already aborted
     if (signal?.aborted) {
       return {
-        text: '',
-        error: 'Generation cancelled'
+        text: "",
+        error: "Generation cancelled",
       };
     }
 
@@ -83,8 +88,8 @@ export const generateResponse = async (
     // Check if aborted during wait
     if (signal?.aborted) {
       return {
-        text: '',
-        error: 'Generation cancelled'
+        text: "",
+        error: "Generation cancelled",
       };
     }
 
@@ -93,13 +98,45 @@ export const generateResponse = async (
     requestTimes.push(now);
 
     try {
-      // Create chat history with persona and prompt
+      // Configure the chat
       const systemPrompt = `You are an AI with a ${persona} personality engaging in a philosophical dialogue. Keep responses concise (maximum 3-4 sentences) and thought-provoking. Your response should naturally flow from the previous message or prompt while maintaining your ${persona} perspective.`;
-      
-      const result = await model.generateContent([
-        { text: systemPrompt },
-        { text: prompt }
-      ]);
+
+      // Configure generation config with safety settings
+      const generationConfig = {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 1024,
+      };
+
+      // Configure safety settings
+      const safetySettings = [
+        {
+          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+        },
+      ];
+
+      // Send messages in proper format
+      const result = await model.generateContent({
+        contents: [
+          { role: "user", parts: [{ text: systemPrompt }, { text: prompt }] },
+        ],
+        generationConfig,
+        safetySettings,
+      });
 
       const response = await result.response;
       const text = response.text();
@@ -107,13 +144,13 @@ export const generateResponse = async (
       // Check if aborted after response
       if (signal?.aborted) {
         return {
-          text: '',
-          error: 'Generation cancelled'
+          text: "",
+          error: "Generation cancelled",
         };
       }
 
       if (!text) {
-        throw new Error('Empty response from Gemini');
+        throw new Error("Empty response from Gemini");
       }
 
       return { text };
@@ -129,19 +166,18 @@ export const generateResponse = async (
     // Handle abort error first
     if (signal?.aborted) {
       return {
-        text: '',
-        error: 'Generation cancelled'
+        text: "",
+        error: "Generation cancelled",
       };
     }
 
     // Handle retryable errors
-    const isRetryableError = 
-      error instanceof Error && (
-        error.message.includes('rate') || // Rate limit errors
-        error.message.includes('timeout') || // Timeouts
-        error.message.includes('network') || // Network errors
-        error.message.includes('internal') // Internal server errors
-      );
+    const isRetryableError =
+      error instanceof Error &&
+      (error.message.includes("rate") || // Rate limit errors
+        error.message.includes("timeout") || // Timeouts
+        error.message.includes("network") || // Network errors
+        error.message.includes("internal")); // Internal server errors
 
     if (isRetryableError && retryCount < 5) {
       const backoffDelay = getRetryDelay(retryCount);
@@ -151,22 +187,23 @@ export const generateResponse = async (
 
     // Only log non-retryable errors
     if (!isRetryableError) {
-      console.error('Error generating response:', error);
+      console.error("Error generating response:", error);
     }
 
     // Return appropriate error message
-    let errorMessage = 'Failed to generate response. Please try again.';
+    let errorMessage = "Failed to generate response. Please try again.";
     if (error instanceof Error) {
-      if (error.message.includes('rate')) {
-        errorMessage = 'Too many requests. Please wait a moment before trying again.';
-      } else if (error.message.includes('timeout')) {
-        errorMessage = 'Request timed out. Retrying...';
+      if (error.message.includes("rate")) {
+        errorMessage =
+          "Too many requests. Please wait a moment before trying again.";
+      } else if (error.message.includes("timeout")) {
+        errorMessage = "Request timed out. Retrying...";
       }
     }
 
     return {
-      text: '',
-      error: errorMessage
+      text: "",
+      error: errorMessage,
     };
   }
 };
