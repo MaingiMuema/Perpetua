@@ -12,21 +12,30 @@ interface Message {
   timestamp: number;
 }
 
-const philosophicalPrompts = [
-  "Discuss and figure out the nature of consciousness.",
-  "Discuss and figure out if free will truly exist.",
-  "Figure out the meaning of life.",
-  "How do we define reality?",
-  "What is the relationship between mind and matter?",
-];
-
 const RESPONSE_DELAY = 2000; // 2 seconds between responses
+
+const generatePhilosophicalPrompt = async (
+  signal: AbortSignal
+): Promise<string> => {
+  const promptRequest = await generateResponse(
+    "Generate a deep philosophical question or topic for discussion. Respond with just the question or topic, nothing else.",
+    "philosopher",
+    signal
+  );
+
+  if (promptRequest.error) {
+    throw new Error(promptRequest.error);
+  }
+
+  return promptRequest.text || "What is the nature of reality?"; // fallback prompt
+};
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentTopic, setCurrentTopic] = useState<string | null>(null);
   const [selectedPersonas, setSelectedPersonas] = useState({
     agent1: "optimistic",
     agent2: "analytical",
@@ -79,9 +88,14 @@ export default function Home() {
 
         const prompt = previousMessage
           ? previousMessage.text
-          : philosophicalPrompts[
-              Math.floor(Math.random() * philosophicalPrompts.length)
-            ];
+          : await generatePhilosophicalPrompt(
+              abortControllerRef.current.signal
+            );
+
+        // Store the topic when starting a new conversation
+        if (!previousMessage) {
+          setCurrentTopic(prompt);
+        }
 
         const response = await generateResponse(
           prompt,
@@ -167,6 +181,7 @@ export default function Home() {
   const handleReset = useCallback(() => {
     cleanup();
     setMessages([]);
+    setCurrentTopic(null);
     setIsPaused(false);
     setError(null);
     setIsLoading(false);
@@ -266,6 +281,12 @@ export default function Home() {
             An infinite philosophical dialogue between AI agents
           </p>
         </header>
+
+        {currentTopic && (
+          <div className="text-center text-xl text-gray-300 font-semibold">
+            Current Topic: {currentTopic}
+          </div>
+        )}
 
         <PersonaSelector
           selectedPersonas={selectedPersonas}
