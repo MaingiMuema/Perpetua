@@ -13,9 +13,9 @@ interface Message {
 }
 
 const philosophicalPrompts = [
-  "What is the nature of consciousness?",
-  "Does free will truly exist?",
-  "What is the meaning of life?",
+  "Discuss and figure out the nature of consciousness.",
+  "Discuss and figure out if free will truly exist.",
+  "Figure out the meaning of life.",
   "How do we define reality?",
   "What is the relationship between mind and matter?",
 ];
@@ -37,6 +37,7 @@ export default function Home() {
   const isMountedRef = useRef(true);
   const isGeneratingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pausedRef = useRef(false);
 
   // Cleanup function to clear timeout and abort ongoing request
   const cleanup = useCallback(() => {
@@ -53,26 +54,24 @@ export default function Home() {
 
   const generateNextMessage = useCallback(
     async (previousMessage?: Message) => {
-      // Check all conditions that should prevent generation
       if (
         !isMountedRef.current ||
-        isPaused ||
-        isLoading ||
-        isGeneratingRef.current
+        isGeneratingRef.current ||
+        pausedRef.current
       ) {
         return;
       }
 
       try {
+        isGeneratingRef.current = true;
+        setIsLoading(true);
+        setError(null);
+
         // Create new abort controller for this request
         if (abortControllerRef.current) {
           abortControllerRef.current.abort();
         }
         abortControllerRef.current = new AbortController();
-
-        isGeneratingRef.current = true;
-        setIsLoading(true);
-        setError(null);
 
         const isAgent1 = !previousMessage || previousMessage.agent === "agent2";
         const currentAgent = isAgent1 ? "agent1" : "agent2";
@@ -84,28 +83,16 @@ export default function Home() {
               Math.floor(Math.random() * philosophicalPrompts.length)
             ];
 
-        // Clear any existing timeout before making the request
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-          timeoutRef.current = null;
-        }
-
         const response = await generateResponse(
           prompt,
           personas[currentPersona as keyof typeof personas].name,
           abortControllerRef.current.signal
         );
 
-        // Check if we should continue after the response
-        if (!isMountedRef.current || isPaused) {
-          return;
-        }
+        if (!isMountedRef.current || pausedRef.current) return;
 
         if (response.error) {
-          if (response.error === "Generation cancelled") {
-            // Don't show error for cancelled requests
-            return;
-          }
+          if (response.error === "Generation cancelled") return;
           setError(response.error);
           return;
         }
@@ -119,13 +106,10 @@ export default function Home() {
 
           setMessages((prev) => [...prev, newMessage]);
 
-          // Only schedule next message if not paused
-          if (!isPaused && isMountedRef.current) {
+          // Schedule next message if not paused
+          if (isMountedRef.current && !pausedRef.current) {
             timeoutRef.current = setTimeout(() => {
-              // Check pause state again when timeout fires
-              if (!isPaused && isMountedRef.current) {
-                generateNextMessage(newMessage);
-              }
+              generateNextMessage(newMessage);
             }, RESPONSE_DELAY);
           }
         }
@@ -141,7 +125,7 @@ export default function Home() {
         isGeneratingRef.current = false;
       }
     },
-    [isPaused, isLoading, selectedPersonas]
+    [selectedPersonas]
   );
 
   // Cleanup on unmount
@@ -161,22 +145,24 @@ export default function Home() {
   }, [messages.length, isPaused, generateNextMessage]);
 
   const handlePauseToggle = useCallback(() => {
-    setIsPaused((prev) => {
-      const newPausedState = !prev;
+    setIsPaused((prevPaused) => {
+      const newPausedState = !prevPaused;
+      pausedRef.current = newPausedState;
+
       if (newPausedState) {
-        // If pausing, clear any pending operations and abort current request
         cleanup();
-      } else if (messages.length > 0 && !isGeneratingRef.current) {
-        // Only start new message after delay when unpausing and not generating
-        timeoutRef.current = setTimeout(() => {
-          if (isMountedRef.current && !isPaused) {
-            generateNextMessage(messages[messages.length - 1]);
-          }
-        }, RESPONSE_DELAY);
+      } else {
+        // When resuming, start the generation loop
+        if (messages.length > 0) {
+          generateNextMessage(messages[messages.length - 1]);
+        } else {
+          generateNextMessage();
+        }
       }
+
       return newPausedState;
     });
-  }, [messages, generateNextMessage, cleanup, isPaused]);
+  }, [messages, generateNextMessage, cleanup]);
 
   const handleReset = useCallback(() => {
     cleanup();
@@ -190,8 +176,7 @@ export default function Home() {
     async (prompt: string) => {
       if (isGeneratingRef.current || isLoading) return;
 
-      // Pause any ongoing auto-generation
-      setIsPaused(true);
+      // Temporarily pause generation while processing the new prompt
       cleanup();
 
       try {
@@ -213,21 +198,16 @@ export default function Home() {
         }
         abortControllerRef.current = new AbortController();
 
-        // Get AI response
         const response = await generateResponse(
           prompt,
           personas[selectedPersonas.agent2 as keyof typeof personas].name,
           abortControllerRef.current.signal
         );
 
-        if (!isMountedRef.current) {
-          return;
-        }
+        if (!isMountedRef.current) return;
 
         if (response.error) {
-          if (response.error === "Generation cancelled") {
-            return;
-          }
+          if (response.error === "Generation cancelled") return;
           setError(response.error);
           return;
         }
@@ -241,14 +221,16 @@ export default function Home() {
 
           setMessages((prev) => [...prev, aiMessage]);
 
-          // Resume auto-generation if not paused
-          if (!isPaused && isMountedRef.current) {
-            timeoutRef.current = setTimeout(() => {
-              if (!isPaused && isMountedRef.current) {
-                generateNextMessage(aiMessage);
-              }
-            }, RESPONSE_DELAY);
-          }
+          // Ensure we're not paused and start the conversation loop
+          pausedRef.current = false;
+          setIsPaused(false);
+
+          // Start the infinite loop with the AI's response
+          timeoutRef.current = setTimeout(() => {
+            if (isMountedRef.current && !pausedRef.current) {
+              generateNextMessage(aiMessage);
+            }
+          }, RESPONSE_DELAY);
         }
       } catch (error) {
         if (isMountedRef.current) {
@@ -262,7 +244,7 @@ export default function Home() {
         isGeneratingRef.current = false;
       }
     },
-    [cleanup, generateNextMessage, isPaused, selectedPersonas, isLoading]
+    [cleanup, generateNextMessage, selectedPersonas, isLoading]
   );
 
   const handlePersonaSelect = useCallback(
