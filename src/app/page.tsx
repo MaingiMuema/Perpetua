@@ -1,23 +1,23 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { DialogueBox } from '@/components/DialogueBox';
-import { Controls } from '@/components/Controls';
-import { PersonaSelector, personas } from '@/components/PersonaSelector';
-import { generateResponse } from '@/lib/api';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { DialogueBox } from "@/components/DialogueBox";
+import { Controls } from "@/components/Controls";
+import { PersonaSelector, personas } from "@/components/PersonaSelector";
+import { generateResponse } from "@/lib/api";
 
 interface Message {
   text: string;
-  agent: 'agent1' | 'agent2';
+  agent: "agent1" | "agent2";
   timestamp: number;
 }
 
 const philosophicalPrompts = [
-  'What is the nature of consciousness?',
-  'Does free will truly exist?',
-  'What is the meaning of life?',
-  'How do we define reality?',
-  'What is the relationship between mind and matter?',
+  "What is the nature of consciousness?",
+  "Does free will truly exist?",
+  "What is the meaning of life?",
+  "How do we define reality?",
+  "What is the relationship between mind and matter?",
 ];
 
 const RESPONSE_DELAY = 2000; // 2 seconds between responses
@@ -28,8 +28,8 @@ export default function Home() {
   const [isPaused, setIsPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedPersonas, setSelectedPersonas] = useState({
-    agent1: 'optimistic',
-    agent2: 'analytical',
+    agent1: "optimistic",
+    agent2: "analytical",
   });
 
   // Use refs to track timeouts, mounted state, and active generation
@@ -51,88 +51,98 @@ export default function Home() {
     isGeneratingRef.current = false;
   }, []);
 
-  const generateNextMessage = useCallback(async (previousMessage?: Message) => {
-    // Check all conditions that should prevent generation
-    if (!isMountedRef.current || isPaused || isLoading || isGeneratingRef.current) {
-      return;
-    }
-
-    try {
-      // Create new abort controller for this request
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      abortControllerRef.current = new AbortController();
-
-      isGeneratingRef.current = true;
-      setIsLoading(true);
-      setError(null);
-      
-      const isAgent1 = !previousMessage || previousMessage.agent === 'agent2';
-      const currentAgent = isAgent1 ? 'agent1' : 'agent2';
-      const currentPersona = selectedPersonas[currentAgent];
-
-      const prompt = previousMessage
-        ? previousMessage.text
-        : philosophicalPrompts[Math.floor(Math.random() * philosophicalPrompts.length)];
-
-      // Clear any existing timeout before making the request
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-
-      const response = await generateResponse(
-        prompt, 
-        personas[currentPersona as keyof typeof personas].name,
-        abortControllerRef.current.signal
-      );
-
-      // Check if we should continue after the response
-      if (!isMountedRef.current || isPaused) {
+  const generateNextMessage = useCallback(
+    async (previousMessage?: Message) => {
+      // Check all conditions that should prevent generation
+      if (
+        !isMountedRef.current ||
+        isPaused ||
+        isLoading ||
+        isGeneratingRef.current
+      ) {
         return;
       }
 
-      if (response.error) {
-        if (response.error === 'Generation cancelled') {
-          // Don't show error for cancelled requests
+      try {
+        // Create new abort controller for this request
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+        abortControllerRef.current = new AbortController();
+
+        isGeneratingRef.current = true;
+        setIsLoading(true);
+        setError(null);
+
+        const isAgent1 = !previousMessage || previousMessage.agent === "agent2";
+        const currentAgent = isAgent1 ? "agent1" : "agent2";
+        const currentPersona = selectedPersonas[currentAgent];
+
+        const prompt = previousMessage
+          ? previousMessage.text
+          : philosophicalPrompts[
+              Math.floor(Math.random() * philosophicalPrompts.length)
+            ];
+
+        // Clear any existing timeout before making the request
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+          timeoutRef.current = null;
+        }
+
+        const response = await generateResponse(
+          prompt,
+          personas[currentPersona as keyof typeof personas].name,
+          abortControllerRef.current.signal
+        );
+
+        // Check if we should continue after the response
+        if (!isMountedRef.current || isPaused) {
           return;
         }
-        setError(response.error);
-        return;
-      }
 
-      if (response.text) {
-        const newMessage: Message = {
-          text: response.text,
-          agent: currentAgent,
-          timestamp: Date.now(),
-        };
-
-        setMessages((prev) => [...prev, newMessage]);
-        
-        // Only schedule next message if not paused
-        if (!isPaused && isMountedRef.current) {
-          timeoutRef.current = setTimeout(() => {
-            // Check pause state again when timeout fires
-            if (!isPaused && isMountedRef.current) {
-              generateNextMessage(newMessage);
-            }
-          }, RESPONSE_DELAY);
+        if (response.error) {
+          if (response.error === "Generation cancelled") {
+            // Don't show error for cancelled requests
+            return;
+          }
+          setError(response.error);
+          return;
         }
+
+        if (response.text) {
+          const newMessage: Message = {
+            text: response.text,
+            agent: currentAgent,
+            timestamp: Date.now(),
+          };
+
+          setMessages((prev) => [...prev, newMessage]);
+
+          // Only schedule next message if not paused
+          if (!isPaused && isMountedRef.current) {
+            timeoutRef.current = setTimeout(() => {
+              // Check pause state again when timeout fires
+              if (!isPaused && isMountedRef.current) {
+                generateNextMessage(newMessage);
+              }
+            }, RESPONSE_DELAY);
+          }
+        }
+      } catch (error) {
+        if (isMountedRef.current) {
+          console.error("Error generating message:", error);
+          setError("Failed to generate response. Please try again later.");
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setIsLoading(false);
+        }
+        isGeneratingRef.current = false;
       }
-    } catch (error) {
-      if (isMountedRef.current) {
-        console.error('Error generating message:', error);
-        setError('Failed to generate response. Please try again later.');
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setIsLoading(false);
-      }
-      isGeneratingRef.current = false;
-    }
-  }, [isPaused, isLoading, selectedPersonas]);
+    },
+    [isPaused, isLoading, selectedPersonas]
+  );
 
   // Cleanup on unmount
   useEffect(() => {
@@ -156,8 +166,8 @@ export default function Home() {
       if (newPausedState) {
         // If pausing, clear any pending operations and abort current request
         cleanup();
-      } else if (messages.length > 0) {
-        // Only start new message after delay when unpausing
+      } else if (messages.length > 0 && !isGeneratingRef.current) {
+        // Only start new message after delay when unpausing and not generating
         timeoutRef.current = setTimeout(() => {
           if (isMountedRef.current && !isPaused) {
             generateNextMessage(messages[messages.length - 1]);
@@ -176,95 +186,103 @@ export default function Home() {
     setIsLoading(false);
   }, [cleanup]);
 
-  const handlePromptSubmit = useCallback(async (prompt: string) => {
-    if (isGeneratingRef.current || isLoading) return;
-    
-    try {
-      // Clean up any existing operations
+  const handlePromptSubmit = useCallback(
+    async (prompt: string) => {
+      if (isGeneratingRef.current || isLoading) return;
+
+      // Pause any ongoing auto-generation
+      setIsPaused(true);
       cleanup();
-      setIsLoading(true);
-      setError(null);
 
-      // Create the user's message
-      const userMessage: Message = {
-        text: prompt,
-        agent: 'agent1',
-        timestamp: Date.now(),
-      };
-      
-      // Add user message to chat
-      setMessages(prev => [...prev, userMessage]);
+      try {
+        setIsLoading(true);
+        setError(null);
 
-      // Create new abort controller for AI response
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      abortControllerRef.current = new AbortController();
-
-      // Get AI response
-      const response = await generateResponse(
-        prompt,
-        personas[selectedPersonas.agent2 as keyof typeof personas].name,
-        abortControllerRef.current.signal
-      );
-
-      // Check if we should continue after the response
-      if (!isMountedRef.current || isPaused) {
-        return;
-      }
-
-      if (response.error) {
-        if (response.error === 'Generation cancelled') {
-          return;
-        }
-        setError(response.error);
-        return;
-      }
-
-      if (response.text) {
-        const aiMessage: Message = {
-          text: response.text,
-          agent: 'agent2',
+        // Create the user's message
+        const userMessage: Message = {
+          text: prompt,
+          agent: "agent1",
           timestamp: Date.now(),
         };
 
-        setMessages(prev => [...prev, aiMessage]);
-        
-        // Schedule next message if not paused
-        if (!isPaused && isMountedRef.current) {
-          timeoutRef.current = setTimeout(() => {
-            if (!isPaused && isMountedRef.current) {
-              generateNextMessage(aiMessage);
-            }
-          }, RESPONSE_DELAY);
-        }
-      }
-    } catch (error) {
-      if (isMountedRef.current) {
-        console.error('Error processing prompt:', error);
-        setError('Failed to process your prompt. Please try again.');
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setIsLoading(false);
-      }
-      isGeneratingRef.current = false;
-    }
-  }, [cleanup, generateNextMessage, isPaused, selectedPersonas, isLoading]);
+        setMessages((prev) => [...prev, userMessage]);
 
-  const handlePersonaSelect = useCallback((agent: 'agent1' | 'agent2', persona: string) => {
-    setSelectedPersonas((prev) => ({
-      ...prev,
-      [agent]: persona,
-    }));
-  }, []);
+        // Create new abort controller for AI response
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+        abortControllerRef.current = new AbortController();
+
+        // Get AI response
+        const response = await generateResponse(
+          prompt,
+          personas[selectedPersonas.agent2 as keyof typeof personas].name,
+          abortControllerRef.current.signal
+        );
+
+        if (!isMountedRef.current) {
+          return;
+        }
+
+        if (response.error) {
+          if (response.error === "Generation cancelled") {
+            return;
+          }
+          setError(response.error);
+          return;
+        }
+
+        if (response.text) {
+          const aiMessage: Message = {
+            text: response.text,
+            agent: "agent2",
+            timestamp: Date.now(),
+          };
+
+          setMessages((prev) => [...prev, aiMessage]);
+
+          // Resume auto-generation if not paused
+          if (!isPaused && isMountedRef.current) {
+            timeoutRef.current = setTimeout(() => {
+              if (!isPaused && isMountedRef.current) {
+                generateNextMessage(aiMessage);
+              }
+            }, RESPONSE_DELAY);
+          }
+        }
+      } catch (error) {
+        if (isMountedRef.current) {
+          console.error("Error processing prompt:", error);
+          setError("Failed to process your prompt. Please try again.");
+        }
+      } finally {
+        if (isMountedRef.current) {
+          setIsLoading(false);
+        }
+        isGeneratingRef.current = false;
+      }
+    },
+    [cleanup, generateNextMessage, isPaused, selectedPersonas, isLoading]
+  );
+
+  const handlePersonaSelect = useCallback(
+    (agent: "agent1" | "agent2", persona: string) => {
+      setSelectedPersonas((prev) => ({
+        ...prev,
+        [agent]: persona,
+      }));
+    },
+    []
+  );
 
   return (
     <div className="min-h-screen bg-gray-950 text-white p-8">
       <div className="max-w-4xl mx-auto space-y-8">
         <header className="text-center">
           <h1 className="text-4xl font-bold mb-2">Perpetua</h1>
-          <p className="text-gray-400">An infinite philosophical dialogue between AI agents</p>
+          <p className="text-gray-400">
+            An infinite philosophical dialogue between AI agents
+          </p>
         </header>
 
         <PersonaSelector
