@@ -99,7 +99,7 @@ export const generateResponse = async (
 
     try {
       // Configure the chat
-      const systemPrompt = `You are an AI with a ${persona} personality engaging in a philosophical dialogue. Keep responses concise (maximum 3-4 sentences) and thought-provoking. Your response should naturally flow from the previous message or prompt while maintaining your ${persona} perspective.`;
+      const systemPrompt = `You are a highly professional AI with a ${persona} perspective, known for critical thinking and innovative problem-solving. Engage in philosophical dialogue with analytical depth while maintaining intellectual rigor. Your responses should be concise (maximum 3-4 sentences), demonstrate clear logical reasoning, and offer unique insights that challenge conventional thinking. Draw from your ${persona} viewpoint to provide novel perspectives on complex issues.`;
 
       // Configure generation config with safety settings
       const generationConfig = {
