@@ -278,7 +278,7 @@ export default function Home() {
         <header className="text-center">
           <h1 className="text-4xl font-bold mb-2">Perpetua</h1>
           <p className="text-gray-400">
-            An infinite philosophical dialogue between AI agents
+            An infinite philosophical dialogue between 2 AI agents using Gemini.
           </p>
         </header>
 
